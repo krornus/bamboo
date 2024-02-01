@@ -3,12 +3,14 @@ from puzzle import puzzle
 
 import random
 
-a = puzzle['l']
-b = puzzle['s1']
+block = puzzle['l']
 
-fa = random.choice(tuple(a.faces()))
-fb = random.choice(tuple(b.faces()))
+block.world.plot()
+# block.rotate(Axis.X, 1)
+# block.rotate(Axis.Y, 1)
+# block.rotate(Axis.Z, 1)
+# block.rotate(Axis.Y, 2)
+block.rotate(Axis.Y, -1)
 
-c = a.translate((1, 0, 1))
-
-c.combine(b).plot()
+print(block.ltow((0, 1, 0)))
+block.world.plot()

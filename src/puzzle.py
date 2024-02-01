@@ -19,11 +19,11 @@ puzzle['z'] = Block(((x < 2) & (z == 0)) | ((x > 0) & (z == 1)))
 
 # z squiggle 1
 x, y, z = np.indices((2, 2, 2))
-puzzle['s1'] = Block( ((x == 0) & ((y == 1) | (z == 1))) | ((x == 1) & (z == 0) & (y == 1)))
+puzzle['s1'] = Block(((x == 0) & ((y == 1) | (z == 1))) | ((x == 1) & (z == 0) & (y == 1)))
 
 # z squiggle 2
 x, y, z = np.indices((2, 2, 2))
-puzzle['s2'] = Block( ((x == 1) & ((y == 1) | (z == 1))) | ((x == 0) & (z == 0) & (y == 1)))
+puzzle['s2'] = Block(((x == 1) & ((y == 1) | (z == 1))) | ((x == 0) & (z == 0) & (y == 1)))
 
 # corner block
 x, y, z = np.indices((2, 2, 2))
