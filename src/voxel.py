@@ -215,40 +215,6 @@ class Block:
         (Axis.X, Axis.Y),
     )
 
-    def ltow(self, vector):
-        """local to world vector transform"""
-
-        # we do something similar to the world() function, in that we flip and
-        # swap values before translating, but flipping in this case is a little
-        # different. x, y = y, -x in an example:
-        #
-        # x, y = 0, 2, given shape = 3,3 produces
-        # x, y = 2, 2 because negation places the coordinate on the opposite
-        # side of the given array.
-        print(self._rotate)
-
-        shape = self._voxels.shape
-        (x, xdir), (y, ydir), (z, zdir) = self._rotate
-
-        if xdir < 0:
-            outx = shape[x] - 1 - vector[x]
-        else:
-            outx = vector[x]
-
-        if ydir < 0:
-            outy = shape[y] - 1 - vector[y]
-        else:
-            outy = vector[y]
-
-        if zdir < 0:
-            outz = shape[z] - 1 - vector[z]
-        else:
-            outz = vector[z]
-
-        x, y, z = self._translate
-
-        return outx + x, outy + y, outz + z
-
     def rotate(self, axis, k):
         # modulus number of 90 degree steps to be [0..3]
         k = k % 4
@@ -314,7 +280,7 @@ class Block:
         if y == Axis.Z:
             rot = rot.swapaxes(Axis.Y, Axis.Z)
 
-        # second, translate the voxels
+        # finally, translate the voxels
         x, y, z = self._translate
 
         if not x and not y and not z:
@@ -327,6 +293,48 @@ class Block:
 
         return Voxels(v)
 
+    def ltow(self, vector):
+        """local to world vector transform"""
+
+        # we do something similar to the world() function, in that we flip and
+        # swap values before translating, but flipping in this case is a little
+        # different. x, y = y, -x in an example:
+        #
+        # x, y = 0, 2, given shape = 3,3 produces
+        # x, y = 2, 2 because negation places the coordinate on the opposite
+        # side of the given array.
+        shape = self._voxels.shape
+        (x, xdir), (y, ydir), (z, zdir) = self._rotate
+
+        if xdir < 0:
+            outx = shape[x] - 1 - vector[x]
+        else:
+            outx = vector[x]
+
+        if ydir < 0:
+            outy = shape[y] - 1 - vector[y]
+        else:
+            outy = vector[y]
+
+        if zdir < 0:
+            outz = shape[z] - 1 - vector[z]
+        else:
+            outz = vector[z]
+
+        x, y, z = self._translate
+
+        return outx + x, outy + y, outz + z
+
+    def pivot(self, axis, k, local):
+        """rotate, keeping local point in the same global location
+
+        NOTE: point is in local space, NOT global
+        """
+        ax, ay, az = self.ltow(local)
+        self.rotate(axis, k)
+        bx, by, bz = self.ltow(local)
+
+        self.translate((ax - bx, ay - by, az - bz))
 
 # class Blocks:
 #     def __init__(self, block):
