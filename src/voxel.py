@@ -1,4 +1,5 @@
-from functools import cached_property
+from collections import namedtuple
+from functools import cached_property, lru_cache
 from enum import Enum, IntEnum
 
 import matplotlib.pyplot as plt
@@ -8,10 +9,18 @@ import numpy as np
 def get_cmap(n, name='hsv'):
     return plt.cm.get_cmap(name, n)
 
+
+Point = namedtuple("Point", ("x", "y", "z", "face"))
+
 class Axis(IntEnum):
     X = 0
     Y = 1
     Z = 2
+
+# dumb kludge but i dont wanna deal with anything annoying and bloaty here
+# just dont change the enum values
+_inverted_face = (1, 0, 3, 2, 5, 4)
+_normals = (Axis.Z, Axis.Z, Axis.X, Axis.X, Axis.Y, Axis.Y)
 
 class Face(IntEnum):
     Bottom = 0
@@ -21,30 +30,44 @@ class Face(IntEnum):
     Front = 4
     Back = 5
 
+    def invert(self):
+        return type(self)(_inverted_face[self])
+
+    def normal(self):
+        return _normals[self]
+
 
 class IntersectionError(ValueError):
     pass
 
 
-class Voxels:
-    # rotation axes, as index by an axis
-    rota = (
+def plot(ary, color='blue'):
+    if isinstance(ary, Block):
+        ary = ary.world()
+
+    colors = np.empty(ary.shape, dtype=object)
+    colors[ary] = color
+
+    ax = plt.figure().add_subplot(projection='3d')
+    ax.voxels(ary, facecolors=colors, edgecolor='k')
+
+    plt.show()
+
+
+def neg(x):
+    """dumb function to flip the direction of an axis for Block.rotate()"""
+    return x[0], -x[1]
+
+class Block:
+    """designates which two axes are modified for a 90 degree rotation on a given axis"""
+    _rotation_axes = (
         (Axis.Y, Axis.Z),
         (Axis.X, Axis.Z),
         (Axis.X, Axis.Y),
     )
 
-    iface = (
-        Face.Top,
-        Face.Bottom,
-        Face.Right,
-        Face.Left,
-        Face.Back,
-        Face.Front,
-    )
-
-    # rotate axes, face -> face mapping
-    rotf = (
+    """maps (current face direction, target face direction) -> rotation arguments"""
+    _rotation_faces = (
         # bottom
         (
             (Axis.X,  0),
@@ -101,119 +124,36 @@ class Voxels:
         ),
     )
 
-    def __init__(self, array, dof=6):
-        self._voxels = array
-        self._dof = dof
+    _translate_faces = (
+        (0, 0, -1),
+        (0, 0, +1),
+        (-1, 0, 0),
+        (+1, 0, 0),
+        (0, -1, 0),
+        (0, +1, 0),
+    )
 
-    def plot(self, color='blue'):
-        colors = np.empty(self._voxels.shape, dtype=object)
-        colors[self._voxels] = color
-
-        ax = plt.figure().add_subplot(projection='3d')
-        ax.voxels(self._voxels, facecolors=colors, edgecolor='k')
-
-        plt.show()
-
-    def faces(self):
-        """get all exposed faces of the block"""
-        xm, ym, zm = self._voxels.shape
-
-        for x, y, z in np.ndindex(self._voxels.shape):
-            if not self._voxels[x, y, z]:
-                continue
-
-            if z == 0 or not self._voxels[x, y, z - 1]:
-                yield x,y,z,Face.Bottom
-
-            if z + 1 >= zm or not self._voxels[x, y, z + 1]:
-                yield x,y,z,Face.Top
-
-            if x == 0 or not self._voxels[x - 1, y, z]:
-                yield x,y,z,Face.Left
-
-            if x + 1 >= xm or not self._voxels[x + 1, y, z]:
-                yield x,y,z,Face.Right
-
-            if y == 0 or not self._voxels[x, y - 1, z]:
-                yield x,y,z,Face.Front
-
-            if y + 1 >= ym or not self._voxels[x, y + 1, z]:
-                yield x,y,z,Face.Back
-
-    def rotate(self, axis, k):
-        '''rotate the voxel by 90 degrees along an axis
-
-        reduce down to 2D (one axis is constant) and apply standard rule
-        90 cw -> x,y = y,-x, etc...
-        '''
-        k = k % 4
-        a, a2 = self.rota[axis]
-
-        if k == 0:
-            b = self._voxels.copy()
-        if k == 1:
-            b = np.flip(self._voxels, a)
-            b = np.swapaxes(b, a, a2)
-        elif k == 2:
-            b = np.flip(self._voxels, (a, a2))
-        elif k == 3:
-            b = np.flip(self._voxels, a2)
-            b = np.swapaxes(b, a, a2)
-
-        return Voxels(b)
-
-    def translate(self, offset):
-        '''create a new array with this block translated by x,y,z'''
-        x, y, z = offset
-        a, b, c = self._voxels.shape
-
-        b = np.zeros((x + a, y + b, z + c), dtype=bool)
-        b[x:, y:, z:] = self._voxels[:,:,:]
-
-        return Voxels(b)
-
-    def face(self, face, target):
-        '''rotate block so that face turns against target face direction'''
-        target = self.iface[target]
-        return self.rotate(*self.rotf[face][target])
-
-    def combine(self, other):
-        '''add two shapes together'''
-
-        # assert not self.intersects(other), "intersecting pieces"
-
-        ax, ay, az = self._voxels.shape
-        bx, by, bz = other._voxels.shape
-        shape = max(ax, bx), max(ay, by), max(az, bz)
-
-        b = np.zeros(shape, dtype=bool)
-
-        b[0:ax, 0:ay, 0:az] = self._voxels[:,:,:]
-
-        if (b[0:bx, 0:by, 0:bz] & other._voxels[:,:,:]).any():
-            raise IntersectionError(other)
-
-        b[0:bx, 0:by, 0:bz] |= other._voxels[:,:,:]
-
-        return Voxels(b)
-
-def neg(x):
-    """dumb function to flip the direction of an axis for Block.rotate()"""
-    return x[0], -x[1]
-
-class Block:
     """a set of voxels with a local and global transform"""
     def __init__(self, ary):
         self._voxels = ary
         self._translate = [0, 0, 0]
         self._rotate = [(Axis.X, 1), (Axis.Y, 1), (Axis.Z, 1)]
 
-    """designates which two axes are modified for a 90 degree rotation on a given axis"""
-    _rotation_axes = (
-        (Axis.Y, Axis.Z),
-        (Axis.X, Axis.Z),
-        (Axis.X, Axis.Y),
-    )
+    def clear_translation(self):
+        translate = [0, 0, 0]
+
+        if translate == self._translate:
+            return
+
+        self._translate = [0, 0, 0]
+
+    def clear_rotation(self):
+        rotate = [(Axis.X, 1), (Axis.Y, 1), (Axis.Z, 1)]
+
+        if rotate == self._rotate:
+            return
+
+        self._rotate = rotate
 
     def rotate(self, axis, k):
         # modulus number of 90 degree steps to be [0..3]
@@ -222,10 +162,29 @@ class Block:
         if k == 0:
             return
 
+        # this is wrong. rotation in this fashion is NOT commutative,
+        # but we are storing the rotation in a commutative fashion
+        # HOWEVER -- i do believe that this 3-tuple can represent all
+        # rotations. if this is not true, we are screwed.
+        # ------------------------------------------------
+        # but wait -- rortation is definitley commutative, stuff like
+        # blender has a just three values. how?? -- i believe it is a
+        # result of applying rotations along local axes. if the axes are
+        # global it is commutative
+        # -----------------------------------------------
+        # yea.., the act of indexing self._rotate on rhs means we are rotating
+        # about a local axis. this should at the very least be taken locally
+        # and translated to global space before application
+
+
+        print(f"rotate:{axis.name} {k} times")
+
         # get the two axes that are being swapped. because this is a 90 degree
         # turn on a single axis, we reduce it to two dimensions. there are
         # simple rules for how to do this, depending on the number of steps
+        print(f"rotation axis:{axis.name}")
         a, b = self._rotation_axes[axis]
+        print(f"rotation axes:{a.name}, {b.name}")
 
         if k == 1:
             self._rotate[a], self._rotate[b] = self._rotate[b], neg(self._rotate[a])
@@ -234,21 +193,25 @@ class Block:
         elif k == 3:
             self._rotate[a], self._rotate[b] = neg(self._rotate[b]), self._rotate[a]
 
-        self.__dict__.pop('world', None)
-
     def translate(self, vector):
         self._translate[Axis.X] += vector[Axis.X]
         self._translate[Axis.Y] += vector[Axis.Y]
         self._translate[Axis.Z] += vector[Axis.Z]
 
-        self.__dict__.pop('world', None)
+        assert self._translate[Axis.X] >= 0, "negative X translation"
+        assert self._translate[Axis.Y] >= 0, "negative Y translation"
+        assert self._translate[Axis.Z] >= 0, "negative Z translation"
+
+    def face(self, src, dest):
+        """rotate block so that src faces toward dest"""
+        return self.rotate(*self._rotation_faces[src][dest])
 
     @cached_property
     def local(self):
         """return Voxels in local coordinates"""
-        return Voxels(self._voxels.copy())
+        return self._voxels.copy()
 
-    @cached_property
+    # @cached_property
     def world(self):
         """return Voxels in world coordinates, applying rotate and translate"""
         (x, xdir), (y, ydir), (z, zdir) = self._rotate
@@ -284,14 +247,14 @@ class Block:
         x, y, z = self._translate
 
         if not x and not y and not z:
-            return Voxels(rot)
+            return rot
 
         a, b, c = rot.shape
 
         v = np.zeros((x + a, y + b, z + c), dtype=bool)
         v[x:, y:, z:] = rot[:,:,:]
 
-        return Voxels(v)
+        return v
 
     def ltow(self, vector):
         """local to world vector transform"""
@@ -335,6 +298,59 @@ class Block:
         bx, by, bz = self.ltow(local)
 
         self.translate((ax - bx, ay - by, az - bz))
+
+    def faces(self):
+        """get all exposed faces of the block"""
+        xm, ym, zm = self._voxels.shape
+
+        for x, y, z in np.ndindex(self._voxels.shape):
+            if not self._voxels[x, y, z]:
+                continue
+
+            if z == 0 or not self._voxels[x, y, z - 1]:
+                yield Point(x, y, z, Face.Bottom)
+
+            if z + 1 >= zm or not self._voxels[x, y, z + 1]:
+                yield Point(x, y, z, Face.Top)
+
+            if x == 0 or not self._voxels[x - 1, y, z]:
+                yield Point(x, y, z, Face.Left)
+
+            if x + 1 >= xm or not self._voxels[x + 1, y, z]:
+                yield Point(x, y, z, Face.Right)
+
+            if y == 0 or not self._voxels[x, y - 1, z]:
+                yield Point(x, y, z, Face.Front)
+
+            if y + 1 >= ym or not self._voxels[x, y + 1, z]:
+                yield Point(x, y, z, Face.Back)
+
+    def adjacencies(self):
+        """get points adjacent to a block"""
+        for x, y, z, f in self.faces():
+            a, b, c = self._translate_faces[f]
+            yield Point(x + a, y + b, z + c, f)
+
+    def combine(self, other):
+        """add two shapes together"""
+        va = self.world()
+        vb = other.world()
+
+        ax, ay, az = va.shape
+        bx, by, bz = vb.shape
+        shape = max(ax, bx), max(ay, by), max(az, bz)
+
+        b = np.zeros(shape, dtype=bool)
+
+        b[0:ax, 0:ay, 0:az] = va[:,:,:]
+
+        if (b[0:bx, 0:by, 0:bz] & vb[:,:,:]).any():
+            raise IntersectionError(other)
+
+        b[0:bx, 0:by, 0:bz] |= vb[:,:,:]
+
+        return b
+
 
 # class Blocks:
 #     def __init__(self, block):
