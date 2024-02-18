@@ -137,7 +137,7 @@ class Block:
     def __init__(self, ary):
         self._voxels = ary
         self._translate = [0, 0, 0]
-        self._rotate = [(Axis.X, 1), (Axis.Y, 1), (Axis.Z, 1)]
+        self._rotate = [(Axis.X, +1), (Axis.Y, +1), (Axis.Z, +1)]
 
     def clear_translation(self):
         translate = [0, 0, 0]
@@ -148,50 +148,67 @@ class Block:
         self._translate = [0, 0, 0]
 
     def clear_rotation(self):
-        rotate = [(Axis.X, 1), (Axis.Y, 1), (Axis.Z, 1)]
+        rotate = [0, 0, 0]
 
         if rotate == self._rotate:
             return
 
         self._rotate = rotate
 
-    def rotate(self, axis, k):
-        # modulus number of 90 degree steps to be [0..3]
-        k = k % 4
+    def rotation(self):
+       def s(x):
+           if x[1] > 0:
+               sign = "+"
+           else:
+               sign = "-"
 
+           return f"{sign}{Axis(x[0]).name.lower()}"
+
+       return f"({s(self._rotate[0])}, {s(self._rotate[1])}, {s(self._rotate[2])})"
+
+    def rotate(self, axis, k):
+        """
+        The base concept for rotation here is as follows:
+
+        90°  clockwise (+x, +y) ➔ (+y, -x)
+        180° clockwise (+x, +y) ➔ (-x, -y)
+        270° clockwise (+x, +y) ➔ (-y, +x)
+        360°           (+x, +y) ➔ (+x, +y)
+
+        Extending this to 3 dimensions is easy because we are only working in
+        90° intervals. We can simply ignore on axis.
+
+        The complication comes with rotation being non-commutative. We cannot
+        simply accumulate rotations, instead we have to store a vector which
+        contains a reconstructable set of rotations. This is generally done
+        with euler angles which are overkill for this type of orthoganal space
+
+        A rotation of (y, 90) would result in axes (+z, +y, -x)
+        A subsequent rotation of (x, 90) would produce (+z, -x, -y)
+        A thrid rotation of (z, 90) would produce (-x, -z, -y)
+
+        Drawn out below
+
+        y, 90 ➔ +x, +z = +z, -x ➔ (+z, +y, -x)
+        x, 90 ➔ +y, +z = +z, -y ➔ (+z, -x, -y)
+        (+z, -x, -y)
+
+        z, 90 ➔ +x, +y = +y, -x ➔ (-x, -z, -y)
+        (-x, -z, -y)
+        """
+
+        k = k % 4
         if k == 0:
             return
 
-        # this is wrong. rotation in this fashion is NOT commutative,
-        # but we are storing the rotation in a commutative fashion
-        # HOWEVER -- i do believe that this 3-tuple can represent all
-        # rotations. if this is not true, we are screwed.
-        # ------------------------------------------------
-        # but wait -- rortation is definitley commutative, stuff like
-        # blender has a just three values. how?? -- i believe it is a
-        # result of applying rotations along local axes. if the axes are
-        # global it is commutative
-        # -----------------------------------------------
-        # yea.., the act of indexing self._rotate on rhs means we are rotating
-        # about a local axis. this should at the very least be taken locally
-        # and translated to global space before application
-
-
-        print(f"rotate:{axis.name} {k} times")
-
-        # get the two axes that are being swapped. because this is a 90 degree
-        # turn on a single axis, we reduce it to two dimensions. there are
-        # simple rules for how to do this, depending on the number of steps
-        print(f"rotation axis:{axis.name}")
-        a, b = self._rotation_axes[axis]
-        print(f"rotation axes:{a.name}, {b.name}")
+        x, y = self._rotation_axes[axis]
 
         if k == 1:
-            self._rotate[a], self._rotate[b] = self._rotate[b], neg(self._rotate[a])
+            self._rotate[x], self._rotate[y] = self._rotate[y], neg(self._rotate[x])
         elif k == 2:
-            self._rotate[a], self._rotate[b] = neg(self._rotate[a]), neg(self._rotate[b])
+            self._rotate[x], self._rotate[y] = neg(self._rotate[x]), neg(self._rotate[y])
         elif k == 3:
-            self._rotate[a], self._rotate[b] = neg(self._rotate[b]), self._rotate[a]
+            self._rotate[x], self._rotate[y] = neg(self._rotate[y]), self._rotate[x]
 
     def translate(self, vector):
         self._translate[Axis.X] += vector[Axis.X]
@@ -234,13 +251,27 @@ class Block:
         else:
             rot = self._voxels.copy()
 
-        # step 2: axis swaps
-        if x == Axis.Y:
-            rot = rot.swapaxes(Axis.X, Axis.Y)
-        elif x == Axis.Z:
-            rot = rot.swapaxes(Axis.X, Axis.Z)
+        # step 2: axis swaps. there are 6 cases
+        # xyz - no swaps
+        # xzy - zy swap
+        # yxz - xy swap
+        # yzx - xz, yz swap
+        # zxy - xy, yz swap
+        # zyx - zx, yz swap
+        order = (Axis.X, Axis.Y, Axis.Z)
 
-        if y == Axis.Z:
+        if (x, z, y) == order:
+            rot = rot.swapaxes(Axis.Z, Axis.Y)
+        elif (y, x, z) == order:
+            rot = rot.swapaxes(Axis.X, Axis.Y)
+        elif (y, z, x) == order:
+            rot = rot.swapaxes(Axis.X, Axis.Z)
+            rot = rot.swapaxes(Axis.Y, Axis.Z)
+        elif (z, x, y) == order:
+            rot = rot.swapaxes(Axis.X, Axis.Y)
+            rot = rot.swapaxes(Axis.Y, Axis.Z)
+        elif (z, y, x) == order:
+            rot = rot.swapaxes(Axis.Z, Axis.X)
             rot = rot.swapaxes(Axis.Y, Axis.Z)
 
         # finally, translate the voxels
